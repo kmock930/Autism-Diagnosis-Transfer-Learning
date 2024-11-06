@@ -4,6 +4,7 @@ from zipfile import ZipFile;
 import constants;
 import numpy as np;
 import cv2;
+import gc;
 import random;
 
 def extractZIP(dataset: str = constants.TIKHARM_DATASET, dataset_alias: str = ""):
@@ -68,14 +69,22 @@ def load_video(path: str, dataset: str = constants.TIKHARM_DATASET, toDisplay: b
         if (ret != True):
             break;
         
-        frame = preprocessFrame(frame);
-
         # Visualize a random video from the set
         if (toDisplay == True):
-            cv2.imshow('Preprocessed Video', frame);
+            cv2.imshow('Raw Video', frame);
+            if (cv2.waitKey(30) & 0xFF == ord('q')):
+                break;
+
+        frame = preprocessFrame(frame);
         
         if (i in frame_indices):
             keyFrames.append(frame);
+        
+        # Visualize a random video from the set
+        if (toDisplay == True):
+            cv2.imshow('Preprocessed Video', frame);
+            if (cv2.waitKey(30) & 0xFF == ord('q')):
+                break;
     
     # https://stackoverflow.com/questions/65446464/how-to-convert-a-video-in-numpy-array
     video = np.stack(keyFrames, axis=0);
@@ -130,14 +139,6 @@ def read_videos(dataset: str = constants.TIKHARM_DATASET):
                 if (os.path.isdir(currPath) == True and dirName in ['train', 'test', 'val']):
                     for categoryName in os.listdir(currPath):
                         currPath = os.path.join(currPath, categoryName);
-                        # Map the category name into array
-                        match (dirName):
-                            case 'train':
-                                y_train.append(categoryName);
-                            case 'test':
-                                y_test.append(categoryName);
-                            case 'val':
-                                y_val.append(categoryName);
                         # iterate through video files
                         videosList: list[str] = os.listdir(currPath);
                         # narrow down the dataset
@@ -156,6 +157,18 @@ def read_videos(dataset: str = constants.TIKHARM_DATASET):
                                     dataset=dataset,
                                     toDisplay=videoName == randVid_name
                                 );
+                                # Map the category names and samples into array
+                                match (dirName):
+                                    case 'train':
+                                        X_train.append(video);
+                                        y_train.append(categoryName);
+                                    case 'test':
+                                        X_test.append(video);
+                                        y_test.append(categoryName);
+                                    case 'val':
+                                        X_val.append(video);
+                                        y_val.append(categoryName);
+                                # Visualize shape
                                 if (videoName == randVid_name):
                                     print(f"Shape of a video of {categoryName} category in the {dirName} set in {dataset} dataset: {video.shape}.");
                                 
@@ -173,6 +186,9 @@ def read_videos(dataset: str = constants.TIKHARM_DATASET):
             # reset set size for next dataset
             originalSetSize = 0;
             selectedSetSize= 0;
+            # free up memory
+            del videosList, selected_videosList;
+            gc.collect();
         else:
             raise FileExistsError(f"Unexpected File exists at root level in your {dataset} dataset.");
 
