@@ -67,24 +67,33 @@ def load_video(path: str, dataset: str = constants.TIKHARM_DATASET, toDisplay: b
         ret, frame = capture.read();
         if (ret != True):
             break;
+        
+        frame = preprocessFrame(frame);
+
+        # Visualize a random video from the set
+        if (toDisplay == True):
+            cv2.imshow('Preprocessed Video', frame);
+        
         if (i in frame_indices):
             keyFrames.append(frame);
-        
-        # Visualize the current frame of the randomly chosen video
-        if (toDisplay == True):
-            cv2.imshow('Video Frame', frame);
-        # Display each frame for 100 ms
-        if cv2.waitKey(100) & 0xFF == ord('q'):
-            break;
     
     # https://stackoverflow.com/questions/65446464/how-to-convert-a-video-in-numpy-array
-    video = np.stack(keyFrames, axis=0); # dimensions (T, H, W, C)
+    video = np.stack(keyFrames, axis=0);
 
     # cleanup
     capture.release();
     cv2.destroyAllWindows();
 
     return video;
+
+def preprocessFrame(frame):
+    # Resize the frame
+    frame = cv2.resize(frame, (540, 380), fx = 0, fy = 0, interpolation = cv2.INTER_CUBIC);
+    # Make the frame grayscale
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY);
+    # Adaptive Thresholding
+    frame = cv2.adaptiveThreshold(frame, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 2);
+    return frame;
 
 def read_videos(dataset: str = constants.TIKHARM_DATASET):
     '''
@@ -114,6 +123,8 @@ def read_videos(dataset: str = constants.TIKHARM_DATASET):
     for rootName in os.listdir(dataset):
         currPath = os.path.join(directory, rootName);
         if (os.path.isdir(currPath) == True):
+            originalSetSize: int = 0;
+            selectedSetSize: int = 0;
             for dirName in os.listdir(currPath):
                 currPath = os.path.join(currPath, dirName);
                 if (os.path.isdir(currPath) == True and dirName in ['train', 'test', 'val']):
@@ -129,18 +140,24 @@ def read_videos(dataset: str = constants.TIKHARM_DATASET):
                                 y_val.append(categoryName);
                         # iterate through video files
                         videosList: list[str] = os.listdir(currPath);
-                        randInd: int = random.randint(0, len(videosList)-1);
-                        randVid_name = videosList[randInd];
-                        for videoName in os.listdir(currPath):
+                        # narrow down the dataset
+                        selected_videosList: list[str] = random.sample(videosList, k=round(len(videosList)/3));
+                        originalSetSize += len(videosList);
+                        selectedSetSize += len(selected_videosList);
+                        # randomize a video for visualization
+                        randInd: int = random.randint(0, len(selected_videosList)-1);
+                        randVid_name = selected_videosList[randInd];
+                        for videoName in selected_videosList:
                             currPath = os.path.join(currPath, videoName);
                             if (os.path.isfile(currPath) and videoName.endswith(constants.ALLOWED_FILE_FORMATS)):
                                 # Save Videos
                                 video = load_video(
-                                    currPath, 
+                                    path=currPath,
+                                    dataset=dataset,
                                     toDisplay=videoName == randVid_name
                                 );
                                 if (videoName == randVid_name):
-                                    print(video.shape)
+                                    print(f"Shape of a video of {categoryName} category in the {dirName} set in {dataset} dataset: {video.shape}.");
                                 
                             else:
                                 raise FileExistsError(f"Unexpected File/Directory {currPath} exists at the end level in your {dataset} dataset.");
@@ -152,6 +169,10 @@ def read_videos(dataset: str = constants.TIKHARM_DATASET):
                     raise FileExistsError(f"Unexpected File/Directory '{currPath}' exists at 2nd level in your {dataset} dataset.");
                 # reset currPath for next iteration
                 currPath = currPath.replace(dirName, "");
+            print(f"Size of Original {dirName} set: {originalSetSize} ; Size of truncated {dirName} set: {selectedSetSize}.");
+            # reset set size for next dataset
+            originalSetSize = 0;
+            selectedSetSize= 0;
         else:
             raise FileExistsError(f"Unexpected File exists at root level in your {dataset} dataset.");
 
