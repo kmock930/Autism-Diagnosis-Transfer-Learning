@@ -28,19 +28,29 @@ def arrange_tf(v1, v2, l1, l2):
     return video1_1, video1_2, video2_1, video2_2
 
 def make_pair_tf(p1, p2):
-    len_p1 = tf.shape(p1)[0]
-    len_p2 = tf.shape(p2)[0]
+    len_p1 = tf.shape(p1)[0]  # Batch size of p1
+    len_p2 = tf.shape(p2)[0]  # Batch size of p2
 
     # Expand dimensions to facilitate broadcasting
     p1_expanded = tf.expand_dims(p1, 1)  # Shape: (len_p1, 1, ...)
-    p1_tiled = tf.tile(p1_expanded, [1, len_p2, 1])  # Shape: (len_p1, len_p2, ...)
-
     p2_expanded = tf.expand_dims(p2, 0)  # Shape: (1, len_p2, ...)
-    p2_tiled = tf.tile(p2_expanded, [len_p1, 1, 1])  # Shape: (len_p1, len_p2, ...)
+
+    # Compute the rank (number of dimensions) of the expanded tensors
+    rank = tf.rank(p1_expanded)
+
+    # Create the multiples vector for tiling
+    multiples_p1 = tf.concat([[1, len_p2], tf.ones(rank - 2, dtype=tf.int32)], axis=0)
+    multiples_p2 = tf.concat([[len_p1, 1], tf.ones(rank - 2, dtype=tf.int32)], axis=0)
+
+    # Tile the tensors
+    p1_tiled = tf.tile(p1_expanded, multiples_p1)
+    p2_tiled = tf.tile(p2_expanded, multiples_p2)
 
     # Reshape to get pairs
-    new_vid1 = tf.reshape(p1_tiled, [-1] + p1.shape.as_list()[1:])
-    new_vid2 = tf.reshape(p2_tiled, [-1] + p2.shape.as_list()[1:])
+    p1_shape = tf.shape(p1)
+    new_shape = tf.concat([[-1], p1_shape[1:]], axis=0)
+    new_vid1 = tf.reshape(p1_tiled, new_shape)
+    new_vid2 = tf.reshape(p2_tiled, new_shape)
 
     return new_vid1, new_vid2
 
