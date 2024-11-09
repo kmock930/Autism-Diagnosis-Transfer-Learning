@@ -145,6 +145,7 @@ def evaluate_model(model, train_generator, val_generator, num_classes):
     results = classifier.evaluate(val_generator)
     print(f"Validation Loss: {results[0]}, Validation Accuracy: {results[1]}")
 
+
 def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.07):
     optimizer = optimizers.Adam(learning_rate=1e-4)
     for epoch in range(epochs):
@@ -153,13 +154,21 @@ def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.0
         for step in range(len(paired_train_generator)):
             (X1_batch, X2_batch), y_batch = paired_train_generator[step]
             with tf.GradientTape() as tape:
-                # 将两个输入分别通过模型
                 features1 = model(X1_batch, training=True)
                 features2 = model(X2_batch, training=True)
-                # 合并特征和标签
+                # Concatenate features
                 features = tf.concat([features1, features2], axis=0)
-                labels = tf.concat([y_batch, y_batch], axis=0)
-                # 计算损失
+
+                # Use y_batch directly without concatenation
+                labels = y_batch
+
+                # Convert labels to correct type
+                labels = tf.cast(labels, tf.int32)
+
+                # Ensure batch sizes match
+                assert features.shape[0] == labels.shape[0], "Features and labels batch sizes do not match."
+
+                # Compute loss
                 loss = supervised_contrastive_loss(labels, features, temperature)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
