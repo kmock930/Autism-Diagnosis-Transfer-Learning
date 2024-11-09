@@ -5,48 +5,77 @@ import numpy as np
 from tensorflow.keras import layers, models, optimizers, losses, metrics
 
 
-def load_c3d_model(input_shape=(16, 112, 112, 3), feature_dim=512):
-    # 定义输入
+def r2plus1d_block(input_tensor, filters, strides=(1, 1, 1)):
+    # 2D 空间卷积
+    x = layers.Conv3D(filters, kernel_size=(1, 3, 3), strides=strides, padding='same', use_bias=False)(input_tensor)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+
+    # 1D 时间卷积
+    x = layers.Conv3D(filters, kernel_size=(3, 1, 1), strides=(1, 1, 1), padding='same', use_bias=False)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+
+    return x
+
+
+def r2plus1d_residual_block(input_tensor, filters, strides=(1, 1, 1)):
+    x = r2plus1d_block(input_tensor, filters, strides)
+    x = r2plus1d_block(x, filters)
+
+    # 跳跃连接
+    shortcut = input_tensor
+    if strides != (1, 1, 1) or input_tensor.shape[-1] != filters:
+        shortcut = layers.Conv3D(filters, kernel_size=1, strides=strides, padding='same', use_bias=False)(input_tensor)
+        shortcut = layers.BatchNormalization()(shortcut)
+
+    x = layers.Add()([x, shortcut])
+    x = layers.ReLU()(x)
+
+    return x
+
+
+def build_r2plus1d_model(input_shape=(16, 112, 112, 3), num_classes=2, feature_dim=512, include_top=False):
     inputs = layers.Input(shape=input_shape)
 
-    # 第一层卷积和池化
-    x = layers.Conv3D(64, kernel_size=(3, 3, 3), activation='relu', padding='same')(inputs)
-    x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
+    # 初始卷积和池化层
+    x = layers.Conv3D(64, kernel_size=(1, 7, 7), strides=(1, 2, 2), padding='same', use_bias=False)(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.MaxPooling3D(pool_size=(1, 3, 3), strides=(1, 2, 2), padding='same')(x)
 
-    # 第二层卷积和池化
-    x = layers.Conv3D(128, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    # 残差块
+    x = r2plus1d_residual_block(x, 64)
+    x = r2plus1d_residual_block(x, 64)
 
-    # 第三、四层卷积和池化
-    x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    x = r2plus1d_residual_block(x, 128, strides=(2, 2, 2))
+    x = r2plus1d_residual_block(x, 128)
 
-    # 第五、六层卷积和池化
-    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    x = r2plus1d_residual_block(x, 256, strides=(2, 2, 2))
+    x = r2plus1d_residual_block(x, 256)
 
-    # 第七、八层卷积和池化
-    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    x = r2plus1d_residual_block(x, 512, strides=(2, 2, 2))
+    x = r2plus1d_residual_block(x, 512)
 
-    # 展平和全连接层
-    x = layers.Flatten()(x)
-    x = layers.Dense(4096, activation='relu')(x)
-    x = layers.Dropout(0.5)(x)
-    x = layers.Dense(4096, activation='relu')(x)
-    x = layers.Dropout(0.5)(x)
+    # 全局平均池化
+    x = layers.GlobalAveragePooling3D()(x)
 
-    # 输出特征向量
+    # 特征投影头（用于对比学习）
     features = layers.Dense(feature_dim, activation='relu')(x)
 
-    # 构建模型
-    model = models.Model(inputs=inputs, outputs=features)
+    if include_top:
+        # 分类层（如果需要）
+        outputs = layers.Dense(num_classes, activation='softmax')(features)
+        model = models.Model(inputs, outputs)
+    else:
+        model = models.Model(inputs, features)
 
     return model
 
+
+def load_r2plus1d_model(input_shape=(16, 112, 112, 3), feature_dim=512, include_top=False):
+    model = build_r2plus1d_model(input_shape=input_shape, feature_dim=feature_dim, include_top=include_top)
+    return model
 
 def supervised_contrastive_loss(labels, features, temperature=0.07):
     # 特征归一化
@@ -147,7 +176,7 @@ def evaluate_model(model, train_generator, val_generator, num_classes):
 
 
 def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.07):
-    optimizer = optimizers.Adam(learning_rate=1e-4)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         epoch_loss_avg = tf.keras.metrics.Mean()
@@ -156,13 +185,8 @@ def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.0
             with tf.GradientTape() as tape:
                 features1 = model(X1_batch, training=True)
                 features2 = model(X2_batch, training=True)
-                # Concatenate features
                 features = tf.concat([features1, features2], axis=0)
-
-                # Concatenate label
                 labels = tf.concat([y_batch, y_batch], axis=0)
-
-                # Compute loss
                 loss = supervised_contrastive_loss(labels, features, temperature)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
