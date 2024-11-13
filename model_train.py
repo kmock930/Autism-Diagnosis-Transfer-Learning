@@ -116,36 +116,6 @@ def train_model(model, train_generator, val_generator, epochs=10, temperature=0.
     return train_loss_results, val_loss_results
 
 
-def evaluate_model(model, train_generator, val_generator, num_classes):
-    # 冻结模型
-    for layer in model.layers:
-        layer.trainable = False
-
-    # 添加线性分类器
-    inputs = model.input
-    features = model.output
-    outputs = layers.Dense(num_classes, activation='softmax')(features)
-    classifier = models.Model(inputs=inputs, outputs=outputs)
-
-    # 编译模型
-    classifier.compile(
-        loss=losses.CategoricalCrossentropy(),
-        optimizer=optimizers.Adam(learning_rate=1e-4),
-        metrics=[metrics.CategoricalAccuracy()]
-    )
-
-    # 训练分类器
-    classifier.fit(
-        train_generator,
-        validation_data=val_generator,
-        epochs=5
-    )
-
-    # 评估模型
-    results = classifier.evaluate(val_generator)
-    print(f"Validation Loss: {results[0]}, Validation Accuracy: {results[1]}")
-
-
 def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.07):
     optimizer = optimizers.Adam(learning_rate=1e-4)
     for epoch in range(epochs):
@@ -170,7 +140,7 @@ def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.0
         print(f"Training Loss: {epoch_loss_avg.result():.4f}")
 
 
-def linear_evaluation(model, train_generator, val_generator1,val_generator2, num_classes=2):
+def linear_evaluation(model, train_generator, test_generator1,test_generator2, num_classes=2):
     # Freeze the base model
     for layer in model.layers:
         layer.trainable = False
@@ -184,21 +154,149 @@ def linear_evaluation(model, train_generator, val_generator1,val_generator2, num
     classifier_model.compile(
         loss=losses.SparseCategoricalCrossentropy(),
         optimizer=optimizers.Adam(learning_rate=1e-4),
-        metrics=[metrics.SparseCategoricalAccuracy()]
+        metrics=['accuracy']
     )
 
     # Train the classifier on the combined dataset
     classifier_model.fit(
         train_generator,
-        validation_data=val_generator1,  # or any validation generator
+        validation_data=test_generator1,  # or any validation generator
         epochs=5
     )
 
     # Evaluate on test sets
     print("Evaluating on Violence Test Set:")
-    results_violence = classifier_model.evaluate(val_generator1)
+    results_violence = classifier_model.evaluate(test_generator1)
     print(f"Violence Test Loss: {results_violence[0]}, Test Accuracy: {results_violence[1]}")
 
     print("Evaluating on TikTok Test Set:")
-    results_tiktok = classifier_model.evaluate(val_generator2)
+    results_tiktok = classifier_model.evaluate(test_generator2)
     print(f"TikTok Test Loss: {results_tiktok[0]}, Test Accuracy: {results_tiktok[1]}")
+
+    return results_violence, results_tiktok
+
+
+def nt_xent_loss(z_i, z_j, temperature=0.5):
+    # z_i 和 z_j 的形状为 (batch_size, feature_dim)
+    batch_size = tf.shape(z_i)[0]
+    z = tf.concat([z_i, z_j], axis=0)  # (2*batch_size, feature_dim)
+
+    # 计算相似度矩阵
+    sim_matrix = tf.matmul(z, z, transpose_b=True)  # (2*batch_size, 2*batch_size)
+    sim_matrix = sim_matrix / temperature
+
+    # 创建标签
+    labels = tf.range(batch_size)
+    labels = tf.concat([labels, labels], axis=0)  # (2*batch_size,)
+
+    # 创建掩码，排除自身对比
+    mask = tf.eye(2 * batch_size)
+
+    # 计算对比损失
+    sim_matrix_exp = tf.exp(sim_matrix) * (1 - mask)
+    sim_sum = tf.reduce_sum(sim_matrix_exp, axis=1, keepdims=True)
+    pos_sim = tf.exp(tf.reduce_sum(z_i * z_j, axis=1) / temperature)
+
+    loss = -tf.math.log(pos_sim / sim_sum[:batch_size, 0])
+    loss = tf.reduce_mean(loss)
+    return loss
+
+def load_c3d_sscl_model(input_shape=(16, 112, 112, 3), feature_dim=512):
+    # 定义输入
+    inputs = layers.Input(shape=input_shape)
+
+    # 第一层卷积和池化
+    x = layers.Conv3D(64, kernel_size=(3, 3, 3), activation='relu', padding='same')(inputs)
+    x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
+
+    # 第二层卷积和池化
+    x = layers.Conv3D(128, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
+    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+
+    # 第三、四层卷积和池化
+    x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
+    x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
+    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+
+    # 第五、六层卷积和池化
+    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
+    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
+    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+
+    # 第七、八层卷积和池化
+    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
+    x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
+    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+
+    # 展平和全连接层
+    x = layers.Flatten()(x)
+    x = layers.Dense(4096, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(4096, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+
+    # 输出特征向量
+    features = layers.Dense(feature_dim, activation='relu')(x)
+
+    projections = layers.Dense(feature_dim)(features)
+
+    # 构建模型
+    model = models.Model(inputs=inputs, outputs=projections)
+
+    return model
+
+def train_simclr_model(model, train_generator, epochs=10, temperature=0.5):
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
+
+    for epoch in range(epochs):
+        print(f"Epoch {epoch + 1}/{epochs}")
+        epoch_loss_avg = tf.keras.metrics.Mean()
+
+        for step in range(len(train_generator)):
+            (x_i, x_j), _ = train_generator[step]
+
+            with tf.GradientTape() as tape:
+                # 前向传播
+                z_i = model(x_i, training=True)
+                z_j = model(x_j, training=True)
+
+                # 计算 NT-Xent 损失
+                loss = nt_xent_loss(z_i, z_j, temperature)
+
+            # 反向传播和优化
+            gradients = tape.gradient(loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+            epoch_loss_avg.update_state(loss)
+
+        print(f"Epoch {epoch + 1}, Loss: {epoch_loss_avg.result():.4f}")
+
+def linear_evaluation_sscl(model, train_generator, val_generator,test_generator, num_classes=2):
+    # 冻结编码器参数
+    for layer in model.layers:
+        layer.trainable = False
+
+    # 添加线性分类器
+    inputs = model.input
+    features = model.get_layer(index=-2).output  # 获取特征层的输出
+    outputs = layers.Dense(num_classes, activation='softmax')(features)
+    classifier_model = models.Model(inputs=inputs, outputs=outputs)
+
+    # 编译模型
+    classifier_model.compile(
+        loss='sparse_categorical_crossentropy',
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+        metrics=['accuracy']
+    )
+
+    # 训练分类器
+    classifier_model.fit(
+        train_generator,
+        validation_data=val_generator,
+        epochs=5
+    )
+
+    # 评估模型
+    results = classifier_model.evaluate(test_generator)
+    print(f"Test Loss: {results[0]}, Test Accuracy: {results[1]}")
+    return results
