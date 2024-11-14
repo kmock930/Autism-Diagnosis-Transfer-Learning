@@ -31,7 +31,7 @@ def r2plus1d_residual_block(input_tensor, filters, strides=(1, 1, 1)):
     return x
 
 
-def build_r2plus1d_model(input_shape=(16, 112, 112, 3), num_classes=2, feature_dim=512, include_top=False):
+def build_r2plus1d_model(input_shape=(12, 64, 64, 3), num_classes=2, feature_dim=512, include_top=False):
     inputs = layers.Input(shape=input_shape)
 
     # 初始卷积和池化层
@@ -69,12 +69,12 @@ def build_r2plus1d_model(input_shape=(16, 112, 112, 3), num_classes=2, feature_d
     return model
 
 
-def load_r2plus1d_model(input_shape=(16, 112, 112, 3), feature_dim=512, include_top=False):
+def load_r2plus1d_model(input_shape=(12, 64, 64, 3), feature_dim=512, include_top=False):
     model = build_r2plus1d_model(input_shape=input_shape, feature_dim=feature_dim, include_top=include_top)
     return model
 
 
-def build_sscl_r2plus1d_model(input_shape=(16, 112, 112, 3), num_classes=2, feature_dim=512, include_top=False):
+def build_sscl_r2plus1d_model(input_shape=(12, 64, 64, 3), num_classes=2, feature_dim=512, include_top=False):
     inputs = layers.Input(shape=input_shape)
 
     # 初始卷积和池化层
@@ -113,6 +113,6 @@ def build_sscl_r2plus1d_model(input_shape=(16, 112, 112, 3), num_classes=2, feat
 
     return model
 
-def load_sscl_r2plus1d_model(input_shape=(16, 112, 112, 3), feature_dim=512, include_top=False):
+def load_sscl_r2plus1d_model(input_shape=(12, 64, 64, 3), feature_dim=512, include_top=False):
     model = build_sscl_r2plus1d_model(input_shape=input_shape, feature_dim=feature_dim, include_top=include_top)
     return model

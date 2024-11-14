@@ -45,97 +45,62 @@ def load_c3d_model(input_shape=(12, 64, 64, 3), feature_dim=512):
     return model
 
 
-def supervised_contrastive_loss(labels, features, temperature=0.07):
-    # 特征归一化
+def supervised_contrastive_loss(labels, features, dataset_ids, temperature=0.07):
+    # Normalize features
     features = tf.math.l2_normalize(features, axis=1)
     batch_size = tf.shape(features)[0]
 
-    # 计算相似度矩阵
+    # Compute similarity matrix
     similarity_matrix = tf.matmul(features, features, transpose_b=True)  # (batch_size, batch_size)
 
-    # 获取标签相等的矩阵
+    # Reshape labels and dataset_ids
     labels = tf.reshape(labels, (batch_size, 1))
-    labels_equal = tf.equal(labels, tf.transpose(labels))  # (batch_size, batch_size)
-    labels_equal = tf.cast(labels_equal, tf.float32)
+    dataset_ids = tf.reshape(dataset_ids, (batch_size, 1))
 
-    # 掩码，排除自身
-    mask = tf.cast(tf.eye(batch_size), tf.bool)
-    labels_equal = tf.where(mask, tf.zeros_like(labels_equal), labels_equal)
-    similarity_matrix = tf.where(mask, tf.zeros_like(similarity_matrix), similarity_matrix)
+    # Create masks
+    labels_equal = tf.equal(labels, tf.transpose(labels))  # Same labels
+    datasets_different = tf.not_equal(dataset_ids, tf.transpose(dataset_ids))  # Different datasets
 
-    # 计算分子和分母
+    # Positive mask: same label, different dataset
+    positive_mask = tf.logical_and(labels_equal, datasets_different)
+
+    # Negative mask: different label, different dataset
+    negative_mask = tf.logical_and(tf.logical_not(labels_equal), datasets_different)
+
+    # Exclude self-comparisons
+    mask = tf.logical_not(tf.eye(batch_size, dtype=tf.bool))
+    positive_mask = tf.logical_and(positive_mask, mask)
+    negative_mask = tf.logical_and(negative_mask, mask)
+
+    # Numerator and Denominator
     exp_similarity = tf.exp(similarity_matrix / temperature)
-    sum_exp = tf.reduce_sum(exp_similarity, axis=1)
-    pos_exp = tf.reduce_sum(exp_similarity * labels_equal, axis=1)
+    numerator = tf.reduce_sum(exp_similarity * tf.cast(positive_mask, tf.float32), axis=1)
+    denominator = numerator + tf.reduce_sum(exp_similarity * tf.cast(negative_mask, tf.float32), axis=1)
 
-    # 计算损失
-    loss = -tf.math.log(pos_exp / sum_exp)
+    # Avoid division by zero
+    epsilon = 1e-12
+    loss = -tf.math.log((numerator + epsilon) / (denominator + epsilon))
     loss = tf.reduce_mean(loss)
     return loss
 
 
-
-def train_model(model, train_generator, val_generator, epochs=10, temperature=0.07):
-    optimizer = optimizers.Adam(learning_rate=1e-4)
-    train_loss_results = []
-    val_loss_results = []
-
+def train_msupcl_model(model, train_generator, epochs=10, temperature=0.07):
+    optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         epoch_loss_avg = tf.keras.metrics.Mean()
-        epoch_val_loss_avg = tf.keras.metrics.Mean()
-
-        # 训练循环
-        for step, (X_batch, y_batch) in enumerate(train_generator):
+        for step in range(len(train_generator)):
+            X_batch, y_batch, dataset_ids = train_generator[step]
             with tf.GradientTape() as tape:
                 features = model(X_batch, training=True)
-                loss = supervised_contrastive_loss(y_batch, features, temperature)
-            gradients = tape.gradient(loss, model.trainable_variables)
-            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-            epoch_loss_avg.update_state(loss)
-
-        # 记录训练损失
-        train_loss = epoch_loss_avg.result()
-        train_loss_results.append(train_loss)
-
-        # 验证循环
-        for X_batch_val, y_batch_val in val_generator:
-            features_val = model(X_batch_val, training=False)
-            val_loss = supervised_contrastive_loss(y_batch_val, features_val, temperature)
-            epoch_val_loss_avg.update_state(val_loss)
-
-        # 记录验证损失
-        val_loss = epoch_val_loss_avg.result()
-        val_loss_results.append(val_loss)
-
-        print(f"Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
-
-    return train_loss_results, val_loss_results
-
-
-def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.07):
-    optimizer = optimizers.Adam(learning_rate=1e-4)
-    for epoch in range(epochs):
-        print(f"Epoch {epoch + 1}/{epochs}")
-        epoch_loss_avg = tf.keras.metrics.Mean()
-        for step in range(len(paired_train_generator)):
-            (X1_batch, X2_batch), y_batch = paired_train_generator[step]
-            with tf.GradientTape() as tape:
-                features1 = model(X1_batch, training=True)
-                features2 = model(X2_batch, training=True)
-                # 将两个特征拼接
-                features = tf.concat([features1, features2], axis=0)
-                # 标签也拼接
-                labels = tf.concat([y_batch, y_batch], axis=0)
-                # 计算损失
-                loss = supervised_contrastive_loss(labels, features, temperature)
+                loss = supervised_contrastive_loss(y_batch, features, dataset_ids, temperature)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             epoch_loss_avg.update_state(loss)
         print(f"Training Loss: {epoch_loss_avg.result():.4f}")
 
 
-def linear_evaluation(model, train_generator,test_generator1,test_generator2, num_classes=2):
+def linear_evaluation(model, train_generator,test_generator1,test_generator2, num_classes=2, num_epochs=3):
     # Freeze the base model
     for layer in model.layers:
         layer.trainable = False
@@ -155,7 +120,7 @@ def linear_evaluation(model, train_generator,test_generator1,test_generator2, nu
     # Train the classifier on the combined dataset
     classifier_model.fit(
         train_generator,
-        epochs=5
+        epochs=num_epochs
     )
 
     # Evaluate on test sets
@@ -197,7 +162,7 @@ def nt_xent_loss(z_i, z_j, temperature=0.5):
     loss = tf.reduce_mean(loss)
     return loss
 
-def load_c3d_sscl_model(input_shape=(16, 112, 112, 3), feature_dim=512):
+def load_c3d_sscl_model(input_shape=(12, 64, 64, 3), feature_dim=512):
     # 定义输入
     inputs = layers.Input(shape=input_shape)
 
@@ -260,7 +225,7 @@ def train_simclr_model(model, train_generator, epochs=10, temperature=0.5):
             epoch_loss_avg.update_state(loss)
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss_avg.result():.4f}")
 
-def linear_evaluation_sscl(model, train_generator, val_generator, test_generator, num_classes=2):
+def linear_evaluation_sscl(model, train_generator, val_generator, test_generator, num_classes=2,num_epochs=3):
     # 冻结编码器参数
     for layer in model.layers:
         layer.trainable = False
@@ -281,7 +246,7 @@ def linear_evaluation_sscl(model, train_generator, val_generator, test_generator
     classifier_model.fit(
         train_generator,
         validation_data=val_generator,
-        epochs=5
+        epochs=num_epoch
     )
     # 评估模型
     results = classifier_model.evaluate(test_generator)

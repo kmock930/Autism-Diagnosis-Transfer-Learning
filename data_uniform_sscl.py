@@ -12,10 +12,10 @@ np.random.seed(seed)
 random.seed(seed)
 tf.random.set_seed(seed)
 
-CLIP_LEN = 16          # 每个视频剪辑的帧数
-RESIZE_HEIGHT = 128    # 帧的调整高度
-CROP_SIZE = 112        # 裁剪高度
-size2 = 112            # 裁剪宽度
+CLIP_LEN = 12          # 每个视频剪辑的帧数
+RESIZE_HEIGHT = 64    # 帧的调整高度
+CROP_SIZE = 64        # 裁剪高度
+size2 = 64            # 裁剪宽度
 
 
 class SSCLVideoDataGenerator(Sequence):
@@ -182,7 +182,7 @@ class SSCLVideoDataGenerator(Sequence):
     def resize(self, frames):
         resized_frames = []
         for frame in frames:
-            frame = cv2.resize(frame, (112, 112), interpolation=cv2.INTER_LINEAR)
+            frame = cv2.resize(frame, (RESIZE_HEIGHT, RESIZE_HEIGHT), interpolation=cv2.INTER_LINEAR)
             resized_frames.append(frame)
         return np.array(resized_frames)
 
