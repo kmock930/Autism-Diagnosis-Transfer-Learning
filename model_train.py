@@ -1,11 +1,8 @@
-import os
 import tensorflow as tf
-import tensorflow_hub as hub
-import numpy as np
 from tensorflow.keras import layers, models, optimizers, losses, metrics
 
 
-def load_c3d_model(input_shape=(16, 112, 112, 3), feature_dim=512):
+def load_c3d_model(input_shape=(12, 64, 64, 3), feature_dim=512):
     # 定义输入
     inputs = layers.Input(shape=input_shape)
 
@@ -20,7 +17,7 @@ def load_c3d_model(input_shape=(16, 112, 112, 3), feature_dim=512):
     # 第三、四层卷积和池化
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
     # 第五、六层卷积和池化
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
@@ -30,7 +27,7 @@ def load_c3d_model(input_shape=(16, 112, 112, 3), feature_dim=512):
     # 第七、八层卷积和池化
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
     # 展平和全连接层
     x = layers.Flatten()(x)
@@ -126,13 +123,11 @@ def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.0
             with tf.GradientTape() as tape:
                 features1 = model(X1_batch, training=True)
                 features2 = model(X2_batch, training=True)
-                # Concatenate features
+                # 将两个特征拼接
                 features = tf.concat([features1, features2], axis=0)
-
-                # Concatenate label
+                # 标签也拼接
                 labels = tf.concat([y_batch, y_batch], axis=0)
-
-                # Compute loss
+                # 计算损失
                 loss = supervised_contrastive_loss(labels, features, temperature)
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
@@ -140,7 +135,7 @@ def train_msupcl_model(model, paired_train_generator, epochs=10, temperature=0.0
         print(f"Training Loss: {epoch_loss_avg.result():.4f}")
 
 
-def linear_evaluation(model, train_generator, test_generator1,test_generator2, num_classes=2):
+def linear_evaluation(model, train_generator,test_generator1,test_generator2, num_classes=2):
     # Freeze the base model
     for layer in model.layers:
         layer.trainable = False
@@ -160,7 +155,6 @@ def linear_evaluation(model, train_generator, test_generator1,test_generator2, n
     # Train the classifier on the combined dataset
     classifier_model.fit(
         train_generator,
-        validation_data=test_generator1,  # or any validation generator
         epochs=5
     )
 
@@ -177,27 +171,29 @@ def linear_evaluation(model, train_generator, test_generator1,test_generator2, n
 
 
 def nt_xent_loss(z_i, z_j, temperature=0.5):
-    # z_i 和 z_j 的形状为 (batch_size, feature_dim)
     batch_size = tf.shape(z_i)[0]
+
+    # 归一化特征向量
+    z_i = tf.math.l2_normalize(z_i, axis=1)
+    z_j = tf.math.l2_normalize(z_j, axis=1)
+
+    # 拼接特征向量
     z = tf.concat([z_i, z_j], axis=0)  # (2*batch_size, feature_dim)
 
     # 计算相似度矩阵
-    sim_matrix = tf.matmul(z, z, transpose_b=True)  # (2*batch_size, 2*batch_size)
-    sim_matrix = sim_matrix / temperature
-
-    # 创建标签
-    labels = tf.range(batch_size)
-    labels = tf.concat([labels, labels], axis=0)  # (2*batch_size,)
+    similarity_matrix = tf.matmul(z, z, transpose_b=True)  # (2*batch_size, 2*batch_size)
+    similarity_matrix = similarity_matrix / temperature
 
     # 创建掩码，排除自身对比
     mask = tf.eye(2 * batch_size)
+    logits = similarity_matrix - mask * 1e9  # 将自身相似度设为一个极小值
 
-    # 计算对比损失
-    sim_matrix_exp = tf.exp(sim_matrix) * (1 - mask)
-    sim_sum = tf.reduce_sum(sim_matrix_exp, axis=1, keepdims=True)
-    pos_sim = tf.exp(tf.reduce_sum(z_i * z_j, axis=1) / temperature)
+    # 创建标签：对于每个样本，其正样本索引为 (i + batch_size) % (2 * batch_size)
+    positive_indices = tf.concat([tf.range(batch_size, 2 * batch_size), tf.range(0, batch_size)], axis=0)
+    labels = positive_indices
 
-    loss = -tf.math.log(pos_sim / sim_sum[:batch_size, 0])
+    # 计算交叉熵损失
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits)
     loss = tf.reduce_mean(loss)
     return loss
 
@@ -216,7 +212,7 @@ def load_c3d_sscl_model(input_shape=(16, 112, 112, 3), feature_dim=512):
     # 第三、四层卷积和池化
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
     # 第五、六层卷积和池化
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
@@ -226,7 +222,7 @@ def load_c3d_sscl_model(input_shape=(16, 112, 112, 3), feature_dim=512):
     # 第七、八层卷积和池化
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
-    x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
+    x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
     # 展平和全连接层
     x = layers.Flatten()(x)
@@ -236,66 +232,57 @@ def load_c3d_sscl_model(input_shape=(16, 112, 112, 3), feature_dim=512):
     x = layers.Dropout(0.5)(x)
 
     # 输出特征向量
-    features = layers.Dense(feature_dim, activation='relu')(x)
+    features = layers.Dense(feature_dim, activation='relu', name='features')(x)
 
-    projections = layers.Dense(feature_dim)(features)
+    projections = layers.Dense(feature_dim, name='projections')(features)
 
     # 构建模型
-    model = models.Model(inputs=inputs, outputs=projections)
+    model = models.Model(inputs=inputs, outputs=[features, projections])
 
     return model
 
 def train_simclr_model(model, train_generator, epochs=10, temperature=0.5):
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
-
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         epoch_loss_avg = tf.keras.metrics.Mean()
-
         for step in range(len(train_generator)):
             (x_i, x_j), _ = train_generator[step]
-
             with tf.GradientTape() as tape:
-                # 前向传播
-                z_i = model(x_i, training=True)
-                z_j = model(x_j, training=True)
-
+                # 获取投影后的特征
+                _, z_i = model(x_i, training=True)
+                _, z_j = model(x_j, training=True)
                 # 计算 NT-Xent 损失
                 loss = nt_xent_loss(z_i, z_j, temperature)
-
             # 反向传播和优化
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
             epoch_loss_avg.update_state(loss)
-
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss_avg.result():.4f}")
 
-def linear_evaluation_sscl(model, train_generator, val_generator,test_generator, num_classes=2):
+def linear_evaluation_sscl(model, train_generator, val_generator, test_generator, num_classes=2):
     # 冻结编码器参数
     for layer in model.layers:
         layer.trainable = False
-
-    # 添加线性分类器
+    # 定义输入为模型的输入
     inputs = model.input
-    features = model.get_layer(index=-2).output  # 获取特征层的输出
+    # 使用features作为特征
+    features = model.get_layer('features').output
+    # 添加分类层
     outputs = layers.Dense(num_classes, activation='softmax')(features)
     classifier_model = models.Model(inputs=inputs, outputs=outputs)
-
     # 编译模型
     classifier_model.compile(
         loss='sparse_categorical_crossentropy',
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
         metrics=['accuracy']
     )
-
     # 训练分类器
     classifier_model.fit(
         train_generator,
         validation_data=val_generator,
         epochs=5
     )
-
     # 评估模型
     results = classifier_model.evaluate(test_generator)
     print(f"Test Loss: {results[0]}, Test Accuracy: {results[1]}")

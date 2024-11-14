@@ -105,14 +105,18 @@ class SSCLVideoDataGenerator(Sequence):
     def augment_frames(self, frames):
         augmented_frames = []
         for frame in frames:
-
-            # 随机水平翻转
-            if random.random() > 0.5:
-                frame = cv2.flip(frame, 1)
-            # 颜色抖动
+            # 随机颜色抖动
             frame = self.color_jitter(frame)
-            # 高斯模糊
-            frame = self.gaussian_blur(frame)
+            # 随机灰度化
+            if random.random() < 0.2:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            # 随机高斯模糊
+            if random.random() < 0.5:
+                frame = cv2.GaussianBlur(frame, (5, 5), 0)
+            # 随机水平翻转
+            if random.random() < 0.5:
+                frame = cv2.flip(frame, 1)
             augmented_frames.append(frame)
         return np.array(augmented_frames)
 
