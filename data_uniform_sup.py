@@ -119,13 +119,20 @@ class VideoDataGenerator(Sequence):
                     frames.append(frame)
                 frames = np.array(frames).astype(np.uint8)
         cap.release()
+        # print(f"Loaded {len(frames)} frames from {video_path}")
+        # print(f"Frame shape: {frames[0].shape} if frames are not empty")
+        if len(frames) == 0:
+            print(f"No frames loaded from {video_path}")
         return frames
 
     def preprocess_frames(self, frames):
         # 包含 resize、normalize、to_tensor 等操作
-        frames = self.crop(frames, CLIP_LEN, CROP_SIZE, size2)
+        # frames = self.crop(frames, CLIP_LEN, CROP_SIZE, size2)
+        # print(f"After cropping, frames shape: {frames.shape}")
         frames = self.resize(frames)
+        # print(f"After resizing, frames shape: {frames.shape}")
         frames = self.normalize(frames)
+        # print(f"Frame pixel values after normalization: min {frames.min()}, max {frames.max()}")
         frames = self.to_tensor(frames)
         return frames
 
@@ -276,7 +283,7 @@ class MultiDatasetDataGenerator(tf.keras.utils.Sequence):
 
     def preprocess_frames(self, frames):
         # 裁剪
-        frames = self.crop(frames)
+        # frames = self.crop(frames)
         # 调整大小
         frames = self.resize(frames)
         # 归一化

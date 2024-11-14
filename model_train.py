@@ -32,9 +32,9 @@ def load_c3d_model(input_shape=(12, 64, 64, 3), feature_dim=512):
     # 展平和全连接层
     x = layers.Flatten()(x)
     x = layers.Dense(4096, activation='relu')(x)
-    x = layers.Dropout(0.5)(x)
+    x = layers.Dropout(0.3)(x)
     x = layers.Dense(4096, activation='relu')(x)
-    x = layers.Dropout(0.5)(x)
+    x = layers.Dropout(0.3)(x)
 
     # 输出特征向量
     features = layers.Dense(feature_dim, activation='relu')(x)
