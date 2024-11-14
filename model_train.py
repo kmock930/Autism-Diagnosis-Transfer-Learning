@@ -100,7 +100,7 @@ def train_msupcl_model(model, train_generator, epochs=10, temperature=0.07):
         print(f"Training Loss: {epoch_loss_avg.result():.4f}")
 
 
-def linear_evaluation(model, train_generator,test_generator1,test_generator2, num_classes=2, num_epochs=3):
+def linear_evaluation(model, train_generator,test_generator1,test_generator2, num_classes=2, num_epochs=5):
     # Freeze the base model
     for layer in model.layers:
         layer.trainable = False
@@ -232,7 +232,7 @@ def linear_evaluation_sscl(model, train_generator, val_generator, test_generator
     # 定义输入为模型的输入
     inputs = model.input
     # 使用features作为特征
-    features = model.get_layer('features').output
+    features = model.outputs[0]
     # 添加分类层
     outputs = layers.Dense(num_classes, activation='softmax')(features)
     classifier_model = models.Model(inputs=inputs, outputs=outputs)
@@ -246,7 +246,7 @@ def linear_evaluation_sscl(model, train_generator, val_generator, test_generator
     classifier_model.fit(
         train_generator,
         validation_data=val_generator,
-        epochs=num_epoch
+        epochs=num_epochs
     )
     # 评估模型
     results = classifier_model.evaluate(test_generator)

@@ -100,16 +100,16 @@ def build_sscl_r2plus1d_model(input_shape=(12, 64, 64, 3), num_classes=2, featur
     x = layers.GlobalAveragePooling3D()(x)
 
     # 特征投影头（用于对比学习）
-    features = layers.Dense(feature_dim, activation='relu')(x)
+    features = layers.Dense(feature_dim, activation='relu', name='features')(x)
 
-    projections = layers.Dense(feature_dim)(features)
+    projections = layers.Dense(feature_dim, name='projections')(features)
 
     if include_top:
         # 分类层（如果需要）
-        outputs = layers.Dense(num_classes, activation='softmax')(projections)
+        outputs = layers.Dense(num_classes, activation='softmax',name='classifier')(projections)
         model = models.Model(inputs, outputs)
     else:
-        model = models.Model(inputs, projections)
+        model = models.Model(inputs, outputs=[features, projections])
 
     return model
 
