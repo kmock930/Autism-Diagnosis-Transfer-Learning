@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras import layers, models, optimizers, losses, metrics
+from tensorflow.keras import layers, models, optimizers, losses, metrics, callbacks
 
 
 def load_c3d_model(input_shape=(12, 64, 64, 3), feature_dim=512):
@@ -101,6 +101,8 @@ def train_msupcl_model(model, train_generator, epochs=10, temperature=0.07):
 
 
 def linear_evaluation(model, train_generator,test_generator1,test_generator2, num_classes=2, num_epochs=5):
+    lr_scheduler = callbacks.LearningRateScheduler(scheduler)
+
     # Freeze the base model
     for layer in model.layers:
         layer.trainable = False
@@ -120,7 +122,8 @@ def linear_evaluation(model, train_generator,test_generator1,test_generator2, nu
     # Train the classifier on the combined dataset
     classifier_model.fit(
         train_generator,
-        epochs=num_epochs
+        epochs=num_epochs,
+        callbacks=[lr_scheduler],
     )
 
     # Evaluate on test sets
@@ -133,6 +136,12 @@ def linear_evaluation(model, train_generator,test_generator1,test_generator2, nu
     print(f"TikTok Test Loss: {results_tiktok[0]}, Test Accuracy: {results_tiktok[1]}")
 
     return results_violence, results_tiktok
+
+def scheduler(epoch, lr):
+    # 每隔10个epoch，学习率衰减为原来的0.5倍
+    if epoch % 3 == 0 and epoch > 0:
+        return lr * 0.01
+    return lr
 
 
 def nt_xent_loss(z_i, z_j, temperature=0.5):
@@ -227,6 +236,7 @@ def train_simclr_model(model, train_generator, epochs=10, temperature=0.5):
 
 def linear_evaluation_sscl(model, train_generator, val_generator, test_generator, num_classes=2,num_epochs=3):
     # 冻结编码器参数
+    lr_scheduler = callbacks.LearningRateScheduler(scheduler)
     for layer in model.layers:
         layer.trainable = False
     # 定义输入为模型的输入
@@ -246,7 +256,8 @@ def linear_evaluation_sscl(model, train_generator, val_generator, test_generator
     classifier_model.fit(
         train_generator,
         validation_data=val_generator,
-        epochs=num_epochs
+        epochs=num_epochs,
+        callbacks=[lr_scheduler],
     )
     # 评估模型
     results = classifier_model.evaluate(test_generator)

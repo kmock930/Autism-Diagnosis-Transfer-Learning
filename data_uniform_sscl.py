@@ -15,7 +15,7 @@ tf.random.set_seed(seed)
 CLIP_LEN = 12          # 每个视频剪辑的帧数
 RESIZE_HEIGHT = 64    # 帧的调整高度
 CROP_SIZE = 64        # 裁剪高度
-size2 = 64            # 裁剪宽度
+SIZE2 = 64            # 裁剪宽度
 
 
 class SSCLVideoDataGenerator(Sequence):
@@ -122,57 +122,83 @@ class SSCLVideoDataGenerator(Sequence):
 
     def load_frames(self, video_path):
         cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            print(f"Error opening video file: {video_path}")
+            # 返回全零帧以避免形状不一致
+            return np.zeros((CLIP_LEN, RESIZE_HEIGHT, SIZE2, 3), dtype=np.uint8)
+
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frames = []
 
         if total_frames <= 0:
-            # Handle cases where CAP_PROP_FRAME_COUNT is not available
-            # Fallback to reading frames one by one (less efficient)
-            frames = []
+            # 处理帧数不可用的情况
+            # print(f"Total frames not available for {video_path}, reading frames one by one.")
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                frames.append(frame)
-            cap.release()
-            frames = np.array(frames).astype(np.uint8)
-            total_frames = len(frames)
-            if total_frames < CLIP_LEN:
-                # Repeat frames to reach CLIP_LEN
-                repeat_times = (CLIP_LEN - total_frames) // total_frames + 1
-                frames = np.tile(frames, (repeat_times, 1, 1, 1))[:CLIP_LEN]
-            else:
-                # Uniformly sample CLIP_LEN frames
-                indices = np.linspace(0, total_frames - 1, CLIP_LEN).astype(int)
-                frames = frames[indices]
+                if frame is not None:
+                    frames.append(frame)
         else:
-            # Read only the required frames
-            frames = []
             if total_frames < CLIP_LEN:
-                # Read all frames and repeat to reach CLIP_LEN
+                # 读取所有帧并重复以达到 CLIP_LEN
+                # print(f"Total frames ({total_frames}) less than CLIP_LEN ({CLIP_LEN}) for {video_path}, repeating frames.")
                 while True:
                     ret, frame = cap.read()
                     if not ret:
                         break
-                    frames.append(frame)
-                frames = np.array(frames).astype(np.uint8)
-                repeat_times = (CLIP_LEN - total_frames) // total_frames + 1
-                frames = np.tile(frames, (repeat_times, 1, 1, 1))[:CLIP_LEN]
+                    if frame is not None:
+                        frames.append(frame)
+                if len(frames) > 0:
+                    repeat_times = math.ceil(CLIP_LEN / len(frames))
+                    frames = frames * repeat_times
+                    frames = frames[:CLIP_LEN]
+                else:
+                    # 如果没有帧，则使用空白帧
+                    frames = [np.zeros((1024, 576, 3), dtype=np.uint8) for _ in range(CLIP_LEN)]
             else:
-                # Calculate frame indices to sample
+                # 均匀采样 CLIP_LEN 帧
+                # print(f"Total frames ({total_frames}) >= CLIP_LEN ({CLIP_LEN}) for {video_path}, sampling frames.")
                 indices = np.linspace(0, total_frames - 1, CLIP_LEN).astype(int)
                 for idx in indices:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                     ret, frame = cap.read()
-                    if not ret:
-                        break
+                    if not ret or frame is None:
+                        # 如果无法读取，使用最后一帧或空白帧
+                        if len(frames) > 0:
+                            frame = frames[-1]
+                        else:
+                            frame = np.zeros((1024, 576, 3), dtype=np.uint8)
                     frames.append(frame)
-                frames = np.array(frames).astype(np.uint8)
+
         cap.release()
-        return frames
+
+        # 确保帧数为 CLIP_LEN
+        if len(frames) < CLIP_LEN:
+            # print(f"After processing, only {len(frames)} frames loaded for {video_path}. Padding with last frame.")
+            if len(frames) > 0:
+                last_frame = frames[-1]
+            else:
+                last_frame = np.zeros((1024, 576, 3), dtype=np.uint8)
+            while len(frames) < CLIP_LEN:
+                frames.append(last_frame)
+
+        # 确保最终帧数为 CLIP_LEN
+        # if len(frames) != CLIP_LEN:
+            # print(f"Warning: {video_path} has {len(frames)} frames after loading, expected {CLIP_LEN}.")
+
+        # 打印实际帧形状
+        # if len(frames) > 0 and frames[0] is not None:
+            # print(f"Loaded {len(frames)} frames from {video_path}")
+            # print(f"Frame shape: {frames[0].shape}")
+        # else:
+            # print(f"No frames loaded from {video_path}")
+
+        return np.array(frames).astype(np.uint8)
 
     def preprocess_frames(self, frames):
         # 包含 resize、normalize、to_tensor 等操作
-        frames = self.crop(frames, CLIP_LEN, CROP_SIZE, size2)
+        # frames = self.crop(frames, CLIP_LEN, CROP_SIZE, SIZE2)
         frames = self.resize(frames)
         frames = self.normalize(frames)
         frames = self.to_tensor(frames)
