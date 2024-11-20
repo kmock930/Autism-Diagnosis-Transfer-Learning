@@ -1,4 +1,3 @@
-import os
 import random
 import math
 import cv2
@@ -12,24 +11,22 @@ np.random.seed(seed)
 random.seed(seed)
 tf.random.set_seed(seed)
 
-CLIP_LEN = 12          # 每个视频剪辑的帧数
-RESIZE_HEIGHT = 64    # 帧的调整高度
-CROP_SIZE = 64        # 裁剪高度
-SIZE2 = 64            # 裁剪宽度
-
+CLIP_LEN = 12         # Number of frames per video clip
+RESIZE_HEIGHT = 64    # Frame resize height
+CROP_SIZE = 64        # Crop height
+SIZE2 = 64            # Crop width
 
 class SSCLVideoDataGenerator(Sequence):
-    def __init__(self, dataset_paths, labels, batch_size=1, shuffle=True, split='train', augment=True,double_view=True):
+    def __init__(self, dataset_paths, labels, batch_size=1, shuffle=True, split='train', augment=True, double_view=True):
         self.indexes = None
-        self.dataset_paths = dataset_paths  # 视频文件的路径列表
-        self.labels = labels  # 对应的视频标签列表
+        self.dataset_paths = dataset_paths  # List of video file paths
+        self.labels = labels                # Corresponding video labels
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.split = split
         self.on_epoch_end()
         self.augment = augment
         self.double_view = double_view
-
 
     def __len__(self):
         return int(np.floor(len(self.dataset_paths) / self.batch_size))
@@ -49,13 +46,13 @@ class SSCLVideoDataGenerator(Sequence):
 
             frames = self.load_frames(video_path)
 
-            # 生成增强视图
+            # Generate augmented views
             frames_aug1 = self.augment_frames(frames)
             frames_aug2 = None
             if self.double_view:
                 frames_aug2 = self.augment_frames(frames)
 
-            # 预处理帧
+            # Preprocess frames
             frames_aug1 = self.preprocess_frames(frames_aug1)
             if self.double_view:
                 frames_aug2 = self.preprocess_frames(frames_aug2)
@@ -85,7 +82,7 @@ class SSCLVideoDataGenerator(Sequence):
         for i, video_path in enumerate(batch_paths):
             frames = self.load_frames(video_path)
             if self.split == 'train' and self.augment:
-                # 生成两个增强版本
+                # Generate two augmented versions
                 frames_1 = self.augment_frames(frames)
                 frames_2 = self.augment_frames(frames)
                 frames_1 = self.preprocess_frames(frames_1)
@@ -105,16 +102,16 @@ class SSCLVideoDataGenerator(Sequence):
     def augment_frames(self, frames):
         augmented_frames = []
         for frame in frames:
-            # 随机颜色抖动
+            # Random color jitter
             frame = self.color_jitter(frame)
-            # 随机灰度化
+            # Random grayscale
             if random.random() < 0.2:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-            # 随机高斯模糊
+            # Random Gaussian blur
             if random.random() < 0.5:
                 frame = cv2.GaussianBlur(frame, (5, 5), 0)
-            # 随机水平翻转
+            # Random horizontal flip
             if random.random() < 0.5:
                 frame = cv2.flip(frame, 1)
             augmented_frames.append(frame)
@@ -124,15 +121,14 @@ class SSCLVideoDataGenerator(Sequence):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             print(f"Error opening video file: {video_path}")
-            # 返回全零帧以避免形状不一致
+            # Return zero frames to avoid shape inconsistency
             return np.zeros((CLIP_LEN, RESIZE_HEIGHT, SIZE2, 3), dtype=np.uint8)
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frames = []
 
         if total_frames <= 0:
-            # 处理帧数不可用的情况
-            # print(f"Total frames not available for {video_path}, reading frames one by one.")
+            # Handle case when total frames are not available
             while True:
                 ret, frame = cap.read()
                 if not ret:
@@ -141,8 +137,7 @@ class SSCLVideoDataGenerator(Sequence):
                     frames.append(frame)
         else:
             if total_frames < CLIP_LEN:
-                # 读取所有帧并重复以达到 CLIP_LEN
-                # print(f"Total frames ({total_frames}) less than CLIP_LEN ({CLIP_LEN}) for {video_path}, repeating frames.")
+                # Read all frames and repeat to reach CLIP_LEN
                 while True:
                     ret, frame = cap.read()
                     if not ret:
@@ -154,17 +149,16 @@ class SSCLVideoDataGenerator(Sequence):
                     frames = frames * repeat_times
                     frames = frames[:CLIP_LEN]
                 else:
-                    # 如果没有帧，则使用空白帧
+                    # If no frames, use blank frames
                     frames = [np.zeros((1024, 576, 3), dtype=np.uint8) for _ in range(CLIP_LEN)]
             else:
-                # 均匀采样 CLIP_LEN 帧
-                # print(f"Total frames ({total_frames}) >= CLIP_LEN ({CLIP_LEN}) for {video_path}, sampling frames.")
+                # Uniformly sample CLIP_LEN frames
                 indices = np.linspace(0, total_frames - 1, CLIP_LEN).astype(int)
                 for idx in indices:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                     ret, frame = cap.read()
                     if not ret or frame is None:
-                        # 如果无法读取，使用最后一帧或空白帧
+                        # If cannot read, use last frame or blank frame
                         if len(frames) > 0:
                             frame = frames[-1]
                         else:
@@ -173,9 +167,8 @@ class SSCLVideoDataGenerator(Sequence):
 
         cap.release()
 
-        # 确保帧数为 CLIP_LEN
+        # Ensure the number of frames is CLIP_LEN
         if len(frames) < CLIP_LEN:
-            # print(f"After processing, only {len(frames)} frames loaded for {video_path}. Padding with last frame.")
             if len(frames) > 0:
                 last_frame = frames[-1]
             else:
@@ -183,27 +176,14 @@ class SSCLVideoDataGenerator(Sequence):
             while len(frames) < CLIP_LEN:
                 frames.append(last_frame)
 
-        # 确保最终帧数为 CLIP_LEN
-        # if len(frames) != CLIP_LEN:
-            # print(f"Warning: {video_path} has {len(frames)} frames after loading, expected {CLIP_LEN}.")
-
-        # 打印实际帧形状
-        # if len(frames) > 0 and frames[0] is not None:
-            # print(f"Loaded {len(frames)} frames from {video_path}")
-            # print(f"Frame shape: {frames[0].shape}")
-        # else:
-            # print(f"No frames loaded from {video_path}")
-
         return np.array(frames).astype(np.uint8)
 
     def preprocess_frames(self, frames):
-        # 包含 resize、normalize、to_tensor 等操作
-        # frames = self.crop(frames, CLIP_LEN, CROP_SIZE, SIZE2)
+        # Includes resize, normalize, to_tensor, etc.
         frames = self.resize(frames)
         frames = self.normalize(frames)
         frames = self.to_tensor(frames)
         return frames
-
 
     def resize(self, frames):
         resized_frames = []
@@ -231,55 +211,53 @@ class SSCLVideoDataGenerator(Sequence):
         height_index = random.randint(0, frames.shape[1] - crop_size)
         width_index = random.randint(0, frames.shape[2] - crop_size2)
         frames = frames[time_index:time_index + clip_len, height_index:height_index + crop_size,
-                 width_index:width_index + crop_size2, :]
+                        width_index:width_index + crop_size2, :]
         if frames.shape[0] < clip_len:
             pad_num = clip_len - frames.shape[0]
             frames = np.concatenate((frames, frames[:pad_num]), axis=0)
         return frames
 
     def color_jitter(self, frame):
-        # 转换为 PIL 图像
+        # Convert to PIL image
         img = Image.fromarray(frame)
 
-        # 随机改变亮度
+        # Randomly change brightness
         if random.random() < 0.8:
             brightness_factor = random.uniform(0.6, 1.4)
             img = ImageEnhance.Brightness(img).enhance(brightness_factor)
 
-        # 随机改变对比度
+        # Randomly change contrast
         if random.random() < 0.8:
             contrast_factor = random.uniform(0.6, 1.4)
             img = ImageEnhance.Contrast(img).enhance(contrast_factor)
 
-        # 随机改变饱和度
+        # Randomly change saturation
         if random.random() < 0.8:
             saturation_factor = random.uniform(0.6, 1.4)
             img = ImageEnhance.Color(img).enhance(saturation_factor)
 
-        # 随机改变色相（色调）
+        # Randomly change hue
         if random.random() < 0.8:
             hue_factor = random.uniform(-0.1, 0.1)
             img = np.array(img.convert('HSV'))
             img[:, :, 0] = (img[:, :, 0].astype(int) + int(hue_factor * 255)) % 255
             img = Image.fromarray(img, mode='HSV').convert('RGB')
 
-        # 转换回 NumPy 数组
+        # Convert back to NumPy array
         frame = np.array(img)
 
         return frame
 
     def gaussian_blur(self, frame):
-        # 转换为 PIL 图像
+        # Convert to PIL image
         img = Image.fromarray(frame)
 
-        # 以一定概率应用高斯模糊
+        # Apply Gaussian blur with certain probability
         if random.random() < 0.5:
             radius = random.uniform(0.1, 2.0)
             img = img.filter(ImageFilter.GaussianBlur(radius))
 
-        # 转换回 NumPy 数组
+        # Convert back to NumPy array
         frame = np.array(img)
 
         return frame
-
-

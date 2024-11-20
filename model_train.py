@@ -1,5 +1,6 @@
 import tensorflow as tf
-from tensorflow.keras import layers, models, optimizers, losses, metrics, callbacks
+from tensorflow.keras import layers, models, optimizers, losses, callbacks
+from tqdm import tqdm
 
 
 def load_c3d_model(input_shape=(12, 64, 64, 3), feature_dim=512):
@@ -86,10 +87,11 @@ def supervised_contrastive_loss(labels, features, dataset_ids, temperature=0.07)
 
 def train_msupcl_model(model, train_generator, epochs=10, temperature=0.07):
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
+    loss_history = []
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         epoch_loss_avg = tf.keras.metrics.Mean()
-        for step in range(len(train_generator)):
+        for step in tqdm(range(len(train_generator)), desc=f"Epoch {epoch + 1}/{epochs}"):
             X_batch, y_batch, dataset_ids = train_generator[step]
             with tf.GradientTape() as tape:
                 features = model(X_batch, training=True)
@@ -97,45 +99,37 @@ def train_msupcl_model(model, train_generator, epochs=10, temperature=0.07):
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             epoch_loss_avg.update_state(loss)
-        print(f"Training Loss: {epoch_loss_avg.result():.4f}")
+        epoch_loss = epoch_loss_avg.result().numpy()
+        print(f"Training Loss: {epoch_loss:.4f}")
+        loss_history.append(epoch_loss)
+    return loss_history
 
 
-def linear_evaluation(model, train_generator,test_generator1,test_generator2, num_classes=2, num_epochs=5):
+
+def linear_evaluation(model, train_generator, test_generator1, test_generator2, num_classes=2, num_epochs=5):
     lr_scheduler = callbacks.LearningRateScheduler(scheduler)
-
-    # Freeze the base model
     for layer in model.layers:
         layer.trainable = False
-
-    # Add a classification head
     features = model.output
     outputs = layers.Dense(num_classes, activation='softmax')(features)
     classifier_model = models.Model(inputs=model.input, outputs=outputs)
-
-    # Compile the classifier
     classifier_model.compile(
         loss=losses.SparseCategoricalCrossentropy(),
         optimizer=optimizers.Adam(learning_rate=1e-4),
         metrics=['accuracy']
     )
-
-    # Train the classifier on the combined dataset
-    classifier_model.fit(
+    history = classifier_model.fit(
         train_generator,
         epochs=num_epochs,
         callbacks=[lr_scheduler],
     )
-
-    # Evaluate on test sets
     print("Evaluating on Violence Test Set:")
     results_violence = classifier_model.evaluate(test_generator1)
     print(f"Violence Test Loss: {results_violence[0]}, Test Accuracy: {results_violence[1]}")
-
     print("Evaluating on TikTok Test Set:")
     results_tiktok = classifier_model.evaluate(test_generator2)
     print(f"TikTok Test Loss: {results_tiktok[0]}, Test Accuracy: {results_tiktok[1]}")
-
-    return results_violence, results_tiktok
+    return results_violence, results_tiktok, history, classifier_model
 
 def scheduler(epoch, lr):
     # 每隔10个epoch，学习率衰减为原来的0.5倍
@@ -217,49 +211,43 @@ def load_c3d_sscl_model(input_shape=(12, 64, 64, 3), feature_dim=512):
 
 def train_simclr_model(model, train_generator, epochs=10, temperature=0.5):
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
+    loss_history = []
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
         epoch_loss_avg = tf.keras.metrics.Mean()
-        for step in range(len(train_generator)):
+        for step in tqdm(range(len(train_generator)), desc=f"Epoch {epoch + 1}/{epochs}"):
             (x_i, x_j), _ = train_generator[step]
             with tf.GradientTape() as tape:
-                # 获取投影后的特征
                 _, z_i = model(x_i, training=True)
                 _, z_j = model(x_j, training=True)
-                # 计算 NT-Xent 损失
                 loss = nt_xent_loss(z_i, z_j, temperature)
-            # 反向传播和优化
             gradients = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
             epoch_loss_avg.update_state(loss)
-        print(f"Epoch {epoch + 1}, Loss: {epoch_loss_avg.result():.4f}")
+        epoch_loss = epoch_loss_avg.result().numpy()
+        print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
+        loss_history.append(epoch_loss)
+    return loss_history
 
-def linear_evaluation_sscl(model, train_generator, val_generator, test_generator, num_classes=2,num_epochs=3):
-    # 冻结编码器参数
+def linear_evaluation_sscl(model, train_generator, val_generator, test_generator, num_classes=2, num_epochs=3):
     lr_scheduler = callbacks.LearningRateScheduler(scheduler)
     for layer in model.layers:
         layer.trainable = False
-    # 定义输入为模型的输入
     inputs = model.input
-    # 使用features作为特征
     features = model.outputs[0]
-    # 添加分类层
     outputs = layers.Dense(num_classes, activation='softmax')(features)
     classifier_model = models.Model(inputs=inputs, outputs=outputs)
-    # 编译模型
     classifier_model.compile(
         loss='sparse_categorical_crossentropy',
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
         metrics=['accuracy']
     )
-    # 训练分类器
-    classifier_model.fit(
+    history = classifier_model.fit(
         train_generator,
         validation_data=val_generator,
         epochs=num_epochs,
         callbacks=[lr_scheduler],
     )
-    # 评估模型
     results = classifier_model.evaluate(test_generator)
     print(f"Test Loss: {results[0]}, Test Accuracy: {results[1]}")
-    return results
+    return results, history, classifier_model
