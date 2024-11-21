@@ -1,46 +1,46 @@
+"""Adapted from MDSupCL/model/model_train.py (https://github.com/asharani97/MDSupCL/tree/main/model)"""
 import tensorflow as tf
-from tensorflow.keras import layers, models, optimizers, losses, callbacks
+from tensorflow.keras import layers, models, optimizers, losses, callbacks,metrics
 from tqdm import tqdm
 
 
 def load_c3d_model(input_shape=(12, 64, 64, 3), feature_dim=512):
-    # 定义输入
+    # Define inputs
     inputs = layers.Input(shape=input_shape)
 
-    # 第一层卷积和池化
+    # Layer 1 convolution and pooling
     x = layers.Conv3D(64, kernel_size=(3, 3, 3), activation='relu', padding='same')(inputs)
     x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
-    # 第二层卷积和池化
+    # Layer 2 convolution and pooling
     x = layers.Conv3D(128, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
 
-    # 第三、四层卷积和池化
+    # Layer 3 and 4 convolution and pooling
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
-    # 第五、六层卷积和池化
+    # Fifth and Sixth Layer Convolution and Pooling
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
 
-    # 第七、八层卷积和池化
+    # Seventh and Eighth Layer Convolution and Pooling
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
-    # 展平和全连接层
+    # Flatten and fully connected layers
     x = layers.Flatten()(x)
     x = layers.Dense(4096, activation='relu')(x)
     x = layers.Dropout(0.3)(x)
     x = layers.Dense(4096, activation='relu')(x)
     x = layers.Dropout(0.3)(x)
 
-    # 输出特征向量
+    # Output feature vector
     features = layers.Dense(feature_dim, activation='relu')(x)
 
-    # 构建模型
     model = models.Model(inputs=inputs, outputs=features)
 
     return model
@@ -86,18 +86,26 @@ def supervised_contrastive_loss(labels, features, dataset_ids, temperature=0.07)
 
 
 def train_msupcl_model(model, train_generator, epochs=10, temperature=0.07):
+    # using adam as optimizers
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
     loss_history = []
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
+        # Calculation of the weighted average of the loss
         epoch_loss_avg = tf.keras.metrics.Mean()
         for step in tqdm(range(len(train_generator)), desc=f"Epoch {epoch + 1}/{epochs}"):
+            # load data
             X_batch, y_batch, dataset_ids = train_generator[step]
             with tf.GradientTape() as tape:
+                # extract features
                 features = model(X_batch, training=True)
+                # calculate loss
                 loss = supervised_contrastive_loss(y_batch, features, dataset_ids, temperature)
+            # calculate gradient by using GradientTape
             gradients = tape.gradient(loss, model.trainable_variables)
+            # update trainable vars
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            # update loss
             epoch_loss_avg.update_state(loss)
         epoch_loss = epoch_loss_avg.result().numpy()
         print(f"Training Loss: {epoch_loss:.4f}")
@@ -107,17 +115,22 @@ def train_msupcl_model(model, train_generator, epochs=10, temperature=0.07):
 
 
 def linear_evaluation(model, train_generator, test_generator1, test_generator2, num_classes=2, num_epochs=5):
+    # learning rate reduced in each 3 epoch
     lr_scheduler = callbacks.LearningRateScheduler(scheduler)
+    # freeze feature extractor
     for layer in model.layers:
         layer.trainable = False
     features = model.output
+    # add classification layer
     outputs = layers.Dense(num_classes, activation='softmax')(features)
     classifier_model = models.Model(inputs=model.input, outputs=outputs)
+    # compile model
     classifier_model.compile(
         loss=losses.SparseCategoricalCrossentropy(),
         optimizer=optimizers.Adam(learning_rate=1e-4),
-        metrics=['accuracy']
+        metrics=[metrics.SparseCategoricalAccuracy()]
     )
+    # train
     history = classifier_model.fit(
         train_generator,
         epochs=num_epochs,
@@ -132,7 +145,7 @@ def linear_evaluation(model, train_generator, test_generator1, test_generator2, 
     return results_violence, results_tiktok, history, classifier_model
 
 def scheduler(epoch, lr):
-    # 每隔10个epoch，学习率衰减为原来的0.5倍
+    # Every 3 epochs, the learning rate decays to 0.01 times the original
     if epoch % 3 == 0 and epoch > 0:
         return lr * 0.01
     return lr
@@ -141,88 +154,95 @@ def scheduler(epoch, lr):
 def nt_xent_loss(z_i, z_j, temperature=0.5):
     batch_size = tf.shape(z_i)[0]
 
-    # 归一化特征向量
+    # Normalized feature vector
     z_i = tf.math.l2_normalize(z_i, axis=1)
     z_j = tf.math.l2_normalize(z_j, axis=1)
 
-    # 拼接特征向量
-    z = tf.concat([z_i, z_j], axis=0)  # (2*batch_size, feature_dim)
+    # Combined Features Vector
+    z = tf.concat([z_i, z_j], axis=0)
 
-    # 计算相似度矩阵
-    similarity_matrix = tf.matmul(z, z, transpose_b=True)  # (2*batch_size, 2*batch_size)
+    # Compute the similarity matrix
+    similarity_matrix = tf.matmul(z, z, transpose_b=True)
     similarity_matrix = similarity_matrix / temperature
 
-    # 创建掩码，排除自身对比
+    # Create masks to exclude self-comparison
     mask = tf.eye(2 * batch_size)
-    logits = similarity_matrix - mask * 1e9  # 将自身相似度设为一个极小值
+    logits = similarity_matrix - mask * 1e9
 
-    # 创建标签：对于每个样本，其正样本索引为 (i + batch_size) % (2 * batch_size)
+    # Create labels
     positive_indices = tf.concat([tf.range(batch_size, 2 * batch_size), tf.range(0, batch_size)], axis=0)
     labels = positive_indices
 
-    # 计算交叉熵损失
+    # Calculating cross-entropy loss
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits)
     loss = tf.reduce_mean(loss)
     return loss
 
 def load_c3d_sscl_model(input_shape=(12, 64, 64, 3), feature_dim=512):
-    # 定义输入
+    # Defining Inputs
     inputs = layers.Input(shape=input_shape)
 
-    # 第一层卷积和池化
+    # Layer 1 convolution and pooling
     x = layers.Conv3D(64, kernel_size=(3, 3, 3), activation='relu', padding='same')(inputs)
     x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
-    # 第二层卷积和池化
+    # Layer 2 convolution and pooling
     x = layers.Conv3D(128, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
 
-    # 第三、四层卷积和池化
+    # Layer 3 and 4 convolution and pooling
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(256, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
-    # 第五、六层卷积和池化
+    # Layer 5 and 6 Convolution and Pooling
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(2, 2, 2), strides=(2, 2, 2))(x)
 
-    # 第七、八层卷积和池化
+    # Layer 7 and 8 Convolution and Pooling
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.Conv3D(512, kernel_size=(3, 3, 3), activation='relu', padding='same')(x)
     x = layers.MaxPooling3D(pool_size=(1, 2, 2), strides=(1, 2, 2))(x)
 
-    # 展平和全连接层
+    # Flatten and fully connected layers
     x = layers.Flatten()(x)
     x = layers.Dense(4096, activation='relu')(x)
     x = layers.Dropout(0.5)(x)
     x = layers.Dense(4096, activation='relu')(x)
     x = layers.Dropout(0.5)(x)
 
-    # 输出特征向量
+    # Output feature vector
     features = layers.Dense(feature_dim, activation='relu', name='features')(x)
 
+    # Output feature head projections
     projections = layers.Dense(feature_dim, name='projections')(features)
-
-    # 构建模型
     model = models.Model(inputs=inputs, outputs=[features, projections])
 
     return model
 
 def train_simclr_model(model, train_generator, epochs=10, temperature=0.5):
+    # learning rate reduced in each 3 epoch
     optimizer = tf.keras.optimizers.Adam(learning_rate=1e-4)
     loss_history = []
     for epoch in range(epochs):
         print(f"Epoch {epoch + 1}/{epochs}")
+        # Calculation of the weighted average of the loss
         epoch_loss_avg = tf.keras.metrics.Mean()
         for step in tqdm(range(len(train_generator)), desc=f"Epoch {epoch + 1}/{epochs}"):
+            # load data
             (x_i, x_j), _ = train_generator[step]
             with tf.GradientTape() as tape:
+                # extract features projections
                 _, z_i = model(x_i, training=True)
                 _, z_j = model(x_j, training=True)
+                # calculate loss
                 loss = nt_xent_loss(z_i, z_j, temperature)
+            # calculate gradient by using GradientTape
             gradients = tape.gradient(loss, model.trainable_variables)
+            # update trainable vars
             optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+            # update loss
             epoch_loss_avg.update_state(loss)
         epoch_loss = epoch_loss_avg.result().numpy()
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
@@ -230,24 +250,30 @@ def train_simclr_model(model, train_generator, epochs=10, temperature=0.5):
     return loss_history
 
 def linear_evaluation_sscl(model, train_generator, val_generator, test_generator, num_classes=2, num_epochs=3):
+    # learning rate reduced in each 3 epoch
     lr_scheduler = callbacks.LearningRateScheduler(scheduler)
+    # freeze feature extractor
     for layer in model.layers:
         layer.trainable = False
     inputs = model.input
+    # read feature from network
     features = model.outputs[0]
+    # add classification layer
     outputs = layers.Dense(num_classes, activation='softmax')(features)
     classifier_model = models.Model(inputs=inputs, outputs=outputs)
     classifier_model.compile(
-        loss='sparse_categorical_crossentropy',
+        loss=losses.SparseCategoricalCrossentropy(),
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
-        metrics=['accuracy']
+        metrics=[metrics.SparseCategoricalAccuracy()]
     )
+    # train model
     history = classifier_model.fit(
         train_generator,
         validation_data=val_generator,
         epochs=num_epochs,
         callbacks=[lr_scheduler],
     )
+    # evaluate
     results = classifier_model.evaluate(test_generator)
     print(f"Test Loss: {results[0]}, Test Accuracy: {results[1]}")
     return results, history, classifier_model
