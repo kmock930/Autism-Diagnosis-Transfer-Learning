@@ -1,3 +1,4 @@
+"""Adapted from https://www.tensorflow.org/tutorials/video/video_classification"""
 from tensorflow.keras import layers, models
 
 def r2plus1d_block(input_tensor, filters, strides=(1, 1, 1)):

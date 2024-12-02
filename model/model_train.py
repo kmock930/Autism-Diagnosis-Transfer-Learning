@@ -5,6 +5,7 @@ from tqdm import tqdm
 
 
 def load_c3d_model(input_shape=(12, 64, 64, 3), feature_dim=512):
+    """Adapted from https://github.com/hx173149/C3D-tensorflow/blob/master/c3d_model.py"""
     # Define inputs
     inputs = layers.Input(shape=input_shape)
 
