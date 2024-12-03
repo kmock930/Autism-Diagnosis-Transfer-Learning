@@ -6,7 +6,7 @@
   <p align="center">
     This Project performs experiments on harmful video classification using C3D and R(2+1)D models.
     <br />
-    Our Paper: [<a href="Exploring Contrastive Learning for Video Classification on Harmful Content" />](https://github.com/kmock930/Harmful-Video-Contrastive-Classification/blob/main/CSI_5341_Project_Report.pdf)
+    Our Paper: https://github.com/kmock930/Harmful-Video-Contrastive-Classification/blob/main/CSI_5341_Project_Report.pdf
   </p>
 </div>
 
