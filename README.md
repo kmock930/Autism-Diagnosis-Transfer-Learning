@@ -52,6 +52,8 @@ The experimental scripts are implemented in main.ipynb in order to facilitate th
 
 ## Acknowledgments
 Some of the codes are adapted from Rani and Verma's source code [1]: https://github.com/asharani97/MDSupCL
+Codes of C3D are adapted from https://github.com/hx173149/C3D-tensorflow/blob/master/c3d_model.py
+Codes of R2+1D_18 are adapted from https://www.tensorflow.org/tutorials/video/video_classification
 
 ## Reference
 [1] A. Rani and Y. Verma, “Activity-based early autism diagnosis using a
