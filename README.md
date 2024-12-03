@@ -8,7 +8,7 @@
     <br />
     Our Paper: 
   </p>
-  [<a href="" />](https://github.com/kmock930/Harmful-Video-Contrastive-Classification/blob/main/CSI_5341_Project_Report.pdf)
+  [<a href="Exploring Contrastive Learning for Video Classification on Harmful Content" />](https://github.com/kmock930/Harmful-Video-Contrastive-Classification/blob/main/CSI_5341_Project_Report.pdf)
 </div>
 
 
